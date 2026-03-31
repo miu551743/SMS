@@ -53,39 +53,56 @@ export default function AdmitCards() {
       });
       const data = await res.json();
       
-      const doc = new jsPDF();
+      const doc = new jsPDF('p', 'mm', 'a4');
       
+      const cardsPerPage = 8;
+      const cardWidth = 95;
+      const cardHeight = 65;
+      const marginX = 10;
+      const marginY = 10;
+      const gapX = 5;
+      const gapY = 5;
+
       data.students.forEach((student: any, index: number) => {
-        if (index > 0) doc.addPage();
+        if (index > 0 && index % cardsPerPage === 0) {
+          doc.addPage();
+        }
+        
+        const cardIndexOnPage = index % cardsPerPage;
+        const col = cardIndexOnPage % 2;
+        const row = Math.floor(cardIndexOnPage / 2);
+        
+        const x = marginX + col * (cardWidth + gapX);
+        const y = marginY + row * (cardHeight + gapY);
         
         // Border
-        doc.rect(10, 10, 190, 100);
+        doc.rect(x, y, cardWidth, cardHeight);
         
         // Header
-        doc.setFontSize(22);
+        doc.setFontSize(12);
         doc.setFont('helvetica', 'bold');
-        doc.text('EDUMANAGE SCHOOL', 105, 25, { align: 'center' });
+        doc.text('EDUMANAGE SCHOOL', x + cardWidth / 2, y + 8, { align: 'center' });
         
-        doc.setFontSize(14);
-        doc.text('ADMIT CARD', 105, 35, { align: 'center' });
+        doc.setFontSize(10);
+        doc.text('ADMIT CARD', x + cardWidth / 2, y + 14, { align: 'center' });
         
         // Details
-        doc.setFontSize(12);
+        doc.setFontSize(8);
         doc.setFont('helvetica', 'normal');
-        doc.text(`Exam: ${data.exam.name}`, 20, 50);
-        doc.text(`Year/Session: ${new Date(data.exam.date).getFullYear()}`, 120, 50);
+        doc.text(`Exam: ${data.exam.name}`, x + 5, y + 22);
+        doc.text(`Year: ${new Date(data.exam.date).getFullYear()}`, x + 55, y + 22);
         
-        doc.text(`Student Name: ${student.name}`, 20, 65);
-        doc.text(`Student ID: ${student.student_id}`, 120, 65);
+        doc.text(`Name: ${student.name}`, x + 5, y + 30);
+        doc.text(`ID: ${student.student_id}`, x + 55, y + 30);
         
-        doc.text(`Class: ${data.classInfo.name}`, 20, 80);
+        doc.text(`Class: ${data.classInfo.name}`, x + 5, y + 38);
         
         // Signatures
-        doc.line(20, 100, 70, 100);
-        doc.text('Student Signature', 25, 105);
+        doc.line(x + 5, y + 55, x + 35, y + 55);
+        doc.text('Student Sign', x + 10, y + 60);
         
-        doc.line(140, 100, 190, 100);
-        doc.text('Principal Signature', 145, 105);
+        doc.line(x + 55, y + 55, x + 85, y + 55);
+        doc.text('Principal Sign', x + 60, y + 60);
       });
       
       doc.save(`Admit_Cards_${data.classInfo.name}_${data.exam.name}.pdf`);

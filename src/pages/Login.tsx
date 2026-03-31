@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { School, User, Lock, Mail } from 'lucide-react';
@@ -8,8 +8,20 @@ export default function Login() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [schoolName, setSchoolName] = useState('EduManage');
   const { login } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    fetch('/api/settings')
+      .then(res => res.json())
+      .then(data => {
+        if (data.school_name) {
+          setSchoolName(data.school_name);
+        }
+      })
+      .catch(err => console.error(err));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +52,7 @@ export default function Login() {
             <School className="h-8 w-8 text-indigo-600" />
           </div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Sign in to your account
+            Sign in to <span className="text-indigo-600">{schoolName}</span>
           </h2>
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>

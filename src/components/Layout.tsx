@@ -1,16 +1,28 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, Users, BookOpen, DollarSign, 
-  FileText, LogOut, Menu, X 
+  FileText, LogOut, Menu, X, Settings
 } from 'lucide-react';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [schoolName, setSchoolName] = useState('EduManage');
+
+  useEffect(() => {
+    fetch('/api/settings')
+      .then(res => res.json())
+      .then(data => {
+        if (data.school_name) {
+          setSchoolName(data.school_name);
+        }
+      })
+      .catch(err => console.error(err));
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -26,6 +38,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     { path: '/accountant/finance', icon: DollarSign, label: 'Finance', roles: ['admin', 'accountant'] },
     { path: '/admin/admit-cards', icon: FileText, label: 'Admit Cards', roles: ['admin'] },
     { path: '/student/dashboard', icon: LayoutDashboard, label: 'My Dashboard', roles: ['student'] },
+    { path: '/admin/activity-log', icon: FileText, label: 'Activity Log', roles: ['admin', 'accountant'] },
+    { path: '/admin/settings', icon: Settings, label: 'Settings', roles: ['admin'] },
   ];
 
   const filteredMenu = menuItems.filter(item => item.roles.includes(user?.role || ''));
@@ -35,7 +49,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Sidebar */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 transform transition-transform duration-200 ease-in-out ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0`}>
         <div className="flex items-center justify-between h-16 px-6 border-b border-gray-200">
-          <span className="text-xl font-bold text-indigo-600">EduManage</span>
+          <span className="text-xl font-bold text-indigo-600 truncate" title={schoolName}>{schoolName}</span>
           <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-gray-500 hover:text-gray-700">
             <X size={24} />
           </button>

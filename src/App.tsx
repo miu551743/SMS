@@ -7,6 +7,8 @@ import Dashboard from './pages/Dashboard';
 import Users from './pages/admin/Users';
 import AdmitCards from './pages/admin/AdmitCards';
 import FeesAndSalaries from './pages/admin/FeesAndSalaries';
+import Settings from './pages/admin/Settings';
+import ActivityLog from './pages/admin/ActivityLog';
 import Attendance from './pages/teacher/Attendance';
 import Finance from './pages/accountant/Finance';
 import Salary from './pages/teacher/Salary';
@@ -33,6 +35,8 @@ export default function App() {
           <Route path="/admin/users" element={<ProtectedRoute allowedRoles={['admin']}><Users /></ProtectedRoute>} />
           <Route path="/admin/fees-salaries" element={<ProtectedRoute allowedRoles={['admin']}><FeesAndSalaries /></ProtectedRoute>} />
           <Route path="/admin/admit-cards" element={<ProtectedRoute allowedRoles={['admin']}><AdmitCards /></ProtectedRoute>} />
+          <Route path="/admin/settings" element={<ProtectedRoute allowedRoles={['admin']}><Settings /></ProtectedRoute>} />
+          <Route path="/admin/activity-log" element={<ProtectedRoute allowedRoles={['admin', 'accountant']}><ActivityLog /></ProtectedRoute>} />
           
           {/* Teacher Routes */}
           <Route path="/teacher/attendance" element={<ProtectedRoute allowedRoles={['teacher', 'admin']}><Attendance /></ProtectedRoute>} />

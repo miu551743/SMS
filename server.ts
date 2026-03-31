@@ -100,13 +100,53 @@ db.exec(`
     FOREIGN KEY(student_id) REFERENCES users(id),
     FOREIGN KEY(class_id) REFERENCES classes(id)
   );
+
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS activity_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    action TEXT NOT NULL,
+    details TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
 `);
+
+// Add new columns to users table if they don't exist
+try {
+  db.exec('ALTER TABLE users ADD COLUMN home_town TEXT');
+  db.exec('ALTER TABLE users ADD COLUMN nid_birth_cert TEXT');
+  db.exec('ALTER TABLE users ADD COLUMN current_address TEXT');
+  db.exec('ALTER TABLE users ADD COLUMN previous_school TEXT');
+  db.exec('ALTER TABLE users ADD COLUMN parents_name TEXT');
+} catch (e) {
+  // Columns likely already exist
+}
+
+// Helper to log activities
+const logActivity = (user_id: number | null, action: string, details: string) => {
+  try {
+    db.prepare('INSERT INTO activity_logs (user_id, action, details) VALUES (?, ?, ?)').run(user_id, action, details);
+  } catch (e) {
+    console.error('Failed to log activity', e);
+  }
+};
 
 // Seed Admin User if not exists
 const adminExists = db.prepare('SELECT * FROM users WHERE role = ?').get('admin');
 if (!adminExists) {
   const hash = bcrypt.hashSync('admin123', 10);
   db.prepare('INSERT INTO users (role, name, email, password_hash) VALUES (?, ?, ?, ?)').run('admin', 'System Admin', 'admin@school.com', hash);
+}
+
+// Seed default settings
+const schoolNameExists = db.prepare('SELECT * FROM settings WHERE key = ?').get('school_name');
+if (!schoolNameExists) {
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('school_name', 'My School');
 }
 
 // Seed some initial data for testing
@@ -153,6 +193,60 @@ const authenticate = (req: any, res: any, next: any) => {
 
 // --- API Routes ---
 
+// Settings
+app.get('/api/settings', (req, res) => {
+  const settings = db.prepare('SELECT * FROM settings').all();
+  const settingsObj = settings.reduce((acc: any, curr: any) => {
+    acc[curr.key] = curr.value;
+    return acc;
+  }, {});
+  res.json(settingsObj);
+});
+
+app.post('/api/settings', authenticate, (req: any, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  const { key, value } = req.body;
+  try {
+    const existing = db.prepare('SELECT * FROM settings WHERE key = ?').get(key);
+    if (existing) {
+      db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(value, key);
+    } else {
+      db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(key, value);
+    }
+    logActivity(req.user.id, 'Update Settings', `Updated setting ${key}`);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Dashboard Stats
+app.get('/api/dashboard/stats', authenticate, (req: any, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  
+  const totalStudents = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'student'").get().count;
+  const totalTeachers = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'teacher'").get().count;
+  const totalClasses = db.prepare("SELECT COUNT(*) as count FROM classes").get().count;
+  const revenue = db.prepare("SELECT SUM(amount) as total FROM transactions WHERE type = 'income'").get().total || 0;
+  
+  const monthlyRevenue = db.prepare(`
+    SELECT strftime('%Y-%m', date) as month, SUM(amount) as total 
+    FROM transactions 
+    WHERE type = 'income' 
+    GROUP BY month 
+    ORDER BY month DESC 
+    LIMIT 6
+  `).all();
+
+  res.json({
+    totalStudents,
+    totalTeachers,
+    totalClasses,
+    revenue,
+    monthlyRevenue: monthlyRevenue.reverse()
+  });
+});
+
 // Login
 app.post('/api/login', (req, res) => {
   const { identifier, password, isStudent } = req.body;
@@ -166,6 +260,7 @@ app.post('/api/login', (req, res) => {
 
   if (user && bcrypt.compareSync(password, user.password_hash)) {
     const token = jwt.sign({ id: user.id, role: user.role, name: user.name, class_id: user.class_id }, JWT_SECRET, { expiresIn: '24h' });
+    logActivity(user.id, 'Login', 'User logged in');
     res.json({ token, user: { id: user.id, role: user.role, name: user.name } });
   } else {
     res.status(401).json({ error: 'Invalid credentials' });
@@ -181,17 +276,26 @@ app.get('/api/me', authenticate, (req: any, res) => {
 // --- Admin Routes ---
 app.get('/api/users', authenticate, (req: any, res) => {
   if (req.user.role !== 'admin' && req.user.role !== 'accountant') return res.sendStatus(403);
-  const users = db.prepare('SELECT id, role, name, email, student_id, class_id FROM users').all();
+  const users = db.prepare('SELECT id, role, name, email, student_id, class_id, home_town, nid_birth_cert, current_address, previous_school, parents_name FROM users').all();
   res.json(users);
 });
 
 app.post('/api/users', authenticate, (req: any, res) => {
   if (req.user.role !== 'admin') return res.sendStatus(403);
-  const { role, name, email, student_id, password, class_id } = req.body;
+  const { role, name, email, student_id, password, class_id, home_town, nid_birth_cert, current_address, previous_school, parents_name } = req.body;
+  
+  if (student_id) {
+    const existingStudent = db.prepare('SELECT id FROM users WHERE student_id = ?').get(student_id);
+    if (existingStudent) {
+      return res.status(400).json({ error: 'Student ID must be unique' });
+    }
+  }
+
   const hash = bcrypt.hashSync(password, 10);
   try {
-    const stmt = db.prepare('INSERT INTO users (role, name, email, student_id, password_hash, class_id) VALUES (?, ?, ?, ?, ?, ?)');
-    const result = stmt.run(role, name, email || null, student_id || null, hash, class_id ? Number(class_id) : null);
+    const stmt = db.prepare('INSERT INTO users (role, name, email, student_id, password_hash, class_id, home_town, nid_birth_cert, current_address, previous_school, parents_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const result = stmt.run(role, name, email || null, student_id || null, hash, class_id ? Number(class_id) : null, home_town || null, nid_birth_cert || null, current_address || null, previous_school || null, parents_name || null);
+    logActivity(req.user.id, 'Create User', `Created user ${name} (${role})`);
     res.json({ id: result.lastInsertRowid });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -200,16 +304,25 @@ app.post('/api/users', authenticate, (req: any, res) => {
 
 app.put('/api/users/:id', authenticate, (req: any, res) => {
   if (req.user.role !== 'admin') return res.sendStatus(403);
-  const { role, name, email, student_id, password, class_id } = req.body;
+  const { role, name, email, student_id, password, class_id, home_town, nid_birth_cert, current_address, previous_school, parents_name } = req.body;
+  
+  if (student_id) {
+    const existingStudent = db.prepare('SELECT id FROM users WHERE student_id = ? AND id != ?').get(student_id, req.params.id);
+    if (existingStudent) {
+      return res.status(400).json({ error: 'Student ID must be unique' });
+    }
+  }
+
   try {
     if (password) {
       const hash = bcrypt.hashSync(password, 10);
-      db.prepare('UPDATE users SET role=?, name=?, email=?, student_id=?, password_hash=?, class_id=? WHERE id=?')
-        .run(role, name, email || null, student_id || null, hash, class_id ? Number(class_id) : null, req.params.id);
+      db.prepare('UPDATE users SET role=?, name=?, email=?, student_id=?, password_hash=?, class_id=?, home_town=?, nid_birth_cert=?, current_address=?, previous_school=?, parents_name=? WHERE id=?')
+        .run(role, name, email || null, student_id || null, hash, class_id ? Number(class_id) : null, home_town || null, nid_birth_cert || null, current_address || null, previous_school || null, parents_name || null, req.params.id);
     } else {
-      db.prepare('UPDATE users SET role=?, name=?, email=?, student_id=?, class_id=? WHERE id=?')
-        .run(role, name, email || null, student_id || null, class_id ? Number(class_id) : null, req.params.id);
+      db.prepare('UPDATE users SET role=?, name=?, email=?, student_id=?, class_id=?, home_town=?, nid_birth_cert=?, current_address=?, previous_school=?, parents_name=? WHERE id=?')
+        .run(role, name, email || null, student_id || null, class_id ? Number(class_id) : null, home_town || null, nid_birth_cert || null, current_address || null, previous_school || null, parents_name || null, req.params.id);
     }
+    logActivity(req.user.id, 'Update User', `Updated user ${name} (${role})`);
     res.json({ success: true });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -227,6 +340,8 @@ app.delete('/api/users/:id', authenticate, (req: any, res) => {
   }
 
   try {
+    const userToDelete = db.prepare('SELECT name, role FROM users WHERE id = ?').get(targetId);
+    
     const transaction = db.transaction(() => {
       // Delete related records first to avoid foreign key constraint errors if any
       db.prepare('DELETE FROM attendance WHERE student_id=?').run(targetId);
@@ -239,10 +354,25 @@ app.delete('/api/users/:id', authenticate, (req: any, res) => {
     });
     
     transaction();
+    if (userToDelete) {
+      logActivity(req.user.id, 'Delete User', `Deleted user ${userToDelete.name} (${userToDelete.role})`);
+    }
     res.json({ success: true });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
+});
+
+app.get('/api/activity-log', authenticate, (req: any, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'accountant') return res.sendStatus(403);
+  const logs = db.prepare(`
+    SELECT a.id, a.action, a.details, a.created_at, u.name as user_name, u.role as user_role
+    FROM activity_logs a
+    LEFT JOIN users u ON a.user_id = u.id
+    ORDER BY a.created_at DESC
+    LIMIT 100
+  `).all();
+  res.json(logs);
 });
 
 app.get('/api/classes', authenticate, (req: any, res) => {
